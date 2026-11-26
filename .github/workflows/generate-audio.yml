@@ -1,0 +1,72 @@
+name: Gerar narração
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: Texto público da narração
+        required: true
+        type: string
+      voice:
+        description: Voz
+        default: pf_dora
+        type: string
+      speed:
+        description: Velocidade
+        default: '1.00'
+        type: string
+      language:
+        description: Idioma
+        default: pt-br
+        type: string
+      output:
+        description: Nome sem extensão
+        default: narracao
+        type: string
+  push:
+    paths:
+      - '.github/workflows/generate-audio.yml'
+permissions:
+  contents: read
+jobs:
+  gerar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        speed: ${{ fromJSON(github.event_name == 'push' && '["0.95","1.00","1.10"]' || '["manual"]') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Preparar ambiente
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg
+          python -m pip install -r requirements.txt
+          mkdir -p models
+          cd models
+          for asset in kokoro-v1.0.onnx voices-v1.0.bin; do
+            curl -fsSL --retry 3 "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/$asset" -o "$asset"
+          done
+          sha256sum -c ../models.sha256
+      - name: Sintetizar
+        env:
+          TEXT: ${{ inputs.text }}
+          SPEED: ${{ inputs.speed || matrix.speed }}
+          VOICE: ${{ inputs.voice || 'pf_dora' }}
+          LANGUAGE: ${{ inputs.language || 'pt-br' }}
+          OUTPUT: ${{ inputs.output || 'Dora' }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            export TEXT="$(cat exemplo.txt)"
+            export OUTPUT="Dora_${SPEED/./_}"
+          fi
+          python generate_audio.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: narracao-${{ matrix.speed }}
+          path: output/
+          retention-days: 1
+          if-no-files-found: error
